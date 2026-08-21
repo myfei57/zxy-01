@@ -56,10 +56,14 @@ func (c *Checker) Pass(segmentID string, data []byte) error {
 	if !verdict.Passed {
 		return fmt.Errorf("segment %s failed QC with score %.2f", segmentID, verdict.Score)
 	}
-	if err := c.store.MarkQCPassed(segmentID); err != nil {
-		return fmt.Errorf("mark segment %s: %w", segmentID, err)
+	// Confirm the durable flush first; only then record the pass mark. A
+	// crash between the two can never leave an unflushed segment marked as
+	// qualified, because Commit refuses a segment whose bytes are not yet
+	// visible in the index.
+	if err := c.store.Commit(segmentID); err != nil {
+		return fmt.Errorf("commit segment %s: %w", segmentID, err)
 	}
-	return c.store.Commit(segmentID)
+	return c.store.MarkQCPassed(segmentID)
 }
 
 // Reset clears the hysteresis state for a fresh evaluation round.
