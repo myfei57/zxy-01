@@ -27,8 +27,11 @@ func NewReassembly() *Reassembly {
 	}
 }
 
-// Add accepts one chunk. Out-of-order chunks wait in the buffer; the
-// contiguous prefix is drained in sequence order.
+// Add accepts one chunk. Out-of-order chunks wait in the buffer; only the
+// contiguous prefix starting at nextSeq is drained into the output, so the
+// reassembled bytes always reflect chunk sequence order, never arrival
+// order. When the expected sequence is still missing the output does not
+// advance, leaving the gap to be filled by a later or retransmitted chunk.
 func (r *Reassembly) Add(seq int, data []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -42,8 +45,19 @@ func (r *Reassembly) Add(seq int, data []byte) error {
 		return fmt.Errorf("duplicate chunk sequence %d", seq)
 	}
 	r.received[seq] = true
-	r.final = append(r.final, data...)
-	r.nextSeq = seq + 1
+	r.buffer[seq] = data
+	// Drain the contiguous prefix in sequence order. The loop stops as soon
+	// as the next expected sequence is absent, so a gap stalls the output
+	// until the missing chunk arrives.
+	for {
+		data, ok := r.buffer[r.nextSeq]
+		if !ok {
+			break
+		}
+		r.final = append(r.final, data...)
+		delete(r.buffer, r.nextSeq)
+		r.nextSeq++
+	}
 	return nil
 }
 
