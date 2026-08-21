@@ -40,7 +40,12 @@ func (w *Worker) Transcode(streamID string, generation int64, source []byte) ([]
 			data = source[start:end]
 		}
 		id := fmt.Sprintf("%s-seg-%02d", streamID, seq)
-		_, _ = w.store.Put(id, seq, generation, data)
+		// A storage failure here must surface as a job error: if the
+		// bytes never landed, the segment id would be silently listed
+		// as produced and the gap only surfaces at manifest time.
+		if _, err := w.store.Put(id, seq, generation, data); err != nil {
+			return nil, fmt.Errorf("store segment %s: %w", id, err)
+		}
 		ids = append(ids, id)
 	}
 	return ids, nil
