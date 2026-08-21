@@ -72,9 +72,23 @@ func (m *Manager) Get(id string) (*Session, bool) {
 	return session, ok
 }
 
-// Cleanup removes a session and always releases its in-flight lock so a
-// later retry of the same id can never block on a stale lock.
+// Cleanup terminates a session. It releases the in-flight write lock,
+// discards any buffered in-flight chunks and removes the session from the
+// registry so a later retry of the same id can never block on a stale lock or
+// inherit half-uploaded data. A session must always end here, whether it
+// completes or fails; it must never stop half-way.
 func (m *Manager) Cleanup(id string) {
-	// Defect variant: cleanup never runs, so the session and its in-flight
-	// lock stay behind.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[id]
+	if !ok {
+		return
+	}
+	// Drop the write lock first so nothing can observe a half-released
+	// session, then discard the in-flight chunk buffer.
+	session.ReleaseLock()
+	if session.reassembly != nil {
+		session.reassembly.Reset()
+	}
+	delete(m.sessions, id)
 }
