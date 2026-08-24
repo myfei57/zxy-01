@@ -78,3 +78,17 @@ func (r *Reassembly) Finalize(count int) ([]byte, error) {
 	r.done = true
 	return bytes.Clone(r.final), nil
 }
+
+// Reset drops every buffered chunk and the reassembled prefix, returning the
+// reassembly to an empty state. It is the terminal cleanup for an upload that
+// never completes, so the in-flight chunk memory is released instead of
+// lingering on a stale session.
+func (r *Reassembly) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextSeq = 1
+	r.buffer = make(map[int][]byte)
+	r.received = make(map[int]bool)
+	r.final = nil
+	r.done = true
+}
