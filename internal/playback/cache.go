@@ -29,8 +29,13 @@ func NewCache() *Cache {
 }
 
 // Write stores an entry only for success statuses. Error responses are
-// refused so a failed fetch can never poison the cache.
+// refused so a failed fetch can never poison the cache: a non-success
+// status returns ErrNonSuccess and leaves any existing entry untouched,
+// so a transient origin failure cannot stick as stale bad content.
 func (c *Cache) Write(key string, status int, data []byte) error {
+	if status < 200 || status >= 300 {
+		return ErrNonSuccess
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[key] = CacheEntry{Status: status, Data: append([]byte(nil), data...)}
