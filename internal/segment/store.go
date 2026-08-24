@@ -41,7 +41,9 @@ func NewStore(dir string) *Store {
 	}
 }
 
-// Put writes a new segment and marks it committed immediately.
+// Put writes a new segment to disk and records it as stored. It does NOT
+// mark the segment committed or QC-passed: those advance only after Commit
+// and MarkQCPassed, so a segment that crashed here is never publishable.
 func (s *Store) Put(id string, seq int, generation int64, data []byte) (Meta, error) {
 	entry, err := s.writer.Write(id, seq, data)
 	if err != nil {
@@ -119,14 +121,23 @@ func (s *Store) Index() *Index {
 }
 
 // OrderedSegments validates that every sequence 1..max exists in generation
-// and returns the segment ids in sequence order. A missing sequence is an
-// error, so a manifest can never be built over a gap.
+// and returns the segment ids in sequence order. Only segments that have been
+// durably committed and passed QC are eligible, so a segment that crashed
+// before finishing its flush (or before clearing QC) can never appear in the
+// publishable set. A missing sequence is an error, so a manifest can never be
+// built over a gap.
 func (s *Store) OrderedSegments(generation int64, max int) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	bySeq := make(map[int]string)
 	for id, gen := range s.generation {
 		if gen != generation {
+			continue
+		}
+		if !s.committed[id] {
+			continue
+		}
+		if s.states[id] != "qc_passed" {
 			continue
 		}
 		entry, ok := s.index.Resolve(id)
